@@ -54,6 +54,6 @@ Lo scraping HTML ha senso quando il sito target non pubblica un `llms.txt`. Ma `
 - BLZ + `llms-full.txt` ufficiale → FTS semantica, snippet line-accurate, locale → 500-1500 token per domanda.
 - 5-10x meno token, sub-50 ms, zero noise.
 
-Repo con setup completo, raw output e replay del benchmark: `[INSERIRE LINK GITHUB]`
+Repo con setup completo, raw output e replay del benchmark: <https://github.com/sekai1710/mcp-agno-blz>
 
 Critiche e correzioni benvenute.
