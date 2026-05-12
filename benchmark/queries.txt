@@ -1,0 +1,9 @@
+# Query usate nel benchmark — replay con entrambi MCP attivi
+
+Q1: workflow step parallel execution
+Q2: agent memory persistent storage
+Q3: team coordinator delegation
+
+# Strumenti chiamati:
+# mcp-agno: search_agno_docs(query) → get_agno_page(slug)
+# BLZ: find(action=search, query, source="agno") → find(action=get, snippets=...)
