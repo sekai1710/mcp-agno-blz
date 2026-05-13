@@ -109,6 +109,73 @@ Per replicare i test:
 2. Lancia le tre query da `benchmark/queries.txt`
 3. Confronta gli output con quelli salvati in `benchmark/raw-metrics.md`
 
+## Auto-update dell'indice
+
+Le docs di Agno cambiano nel tempo: nuove pagine, modifiche, deprecazioni. L'indice locale BLZ va rinfrescato periodicamente.
+
+### Refresh on-demand da Claude Code
+
+Il repo include uno slash command pronto in `.claude/commands/refresh-docs.md`. Per attivarlo:
+
+```bash
+# Project-level (solo dentro questo repo)
+# → già attivo se cloni il repo
+
+# User-level (disponibile in qualsiasi sessione Claude Code)
+cp .claude/commands/refresh-docs.md ~/.claude/commands/refresh-docs.md
+```
+
+Poi dentro Claude Code:
+
+```
+/refresh-docs
+```
+
+Claude esegue `blz refresh agno` e riporta un riassunto compatto (numero heading, righe, errori se ci sono).
+
+### Refresh automatico via cron
+
+Per refresh quotidiano automatico (default 06:00 locale):
+
+```bash
+bash scripts/setup-cron.sh
+```
+
+Output atteso:
+```
+✓ Cron installed:
+  Schedule:    0 6 * * *
+  Command:     /opt/homebrew/bin/blz refresh agno
+  Log file:    /Users/<you>/.blz/refresh-agno.log
+```
+
+Lo script è idempotente: rilanciarlo aggiorna l'entry esistente senza duplicare.
+
+Per personalizzare:
+
+```bash
+SCHEDULE="0 */4 * * *" SOURCE=agno bash scripts/setup-cron.sh   # ogni 4 ore
+BLZ_BIN=/custom/path/blz bash scripts/setup-cron.sh             # path custom
+```
+
+Per rimuovere:
+
+```bash
+crontab -l | grep -v 'blz-refresh-agno' | crontab -
+```
+
+Verifica entry installata:
+
+```bash
+crontab -l | grep blz
+```
+
+Verifica log delle ultime esecuzioni:
+
+```bash
+tail -f ~/.blz/refresh-agno.log
+```
+
 ## Onestà tecnica
 
 Lo scraping HTML resta utile quando il sito target **non pubblica** un `llms.txt`. Ma `docs.agno.com` lo pubblica già, quindi ricavare il contenuto via HTML è solo lavoro extra che produce output peggiore.
