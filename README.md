@@ -131,11 +131,11 @@ Poi dentro Claude Code:
 /refresh-docs
 ```
 
-Claude esegue `blz refresh agno` e riporta un riassunto compatto (numero heading, righe, errori se ci sono).
+Claude esegue `blz refresh --all` e riporta un riassunto compatto per ogni source aggiornata (numero heading, righe, errori se ci sono).
 
 ### Refresh automatico via cron
 
-Per refresh quotidiano automatico (default 06:00 locale):
+Per refresh quotidiano automatico di **tutte** le sources (default 06:00 locale):
 
 ```bash
 bash scripts/setup-cron.sh
@@ -145,23 +145,25 @@ Output atteso:
 ```
 ✓ Cron installed:
   Schedule:    0 6 * * *
-  Command:     /opt/homebrew/bin/blz refresh agno
-  Log file:    /Users/<you>/.blz/refresh-agno.log
+  Command:     /opt/homebrew/bin/blz refresh --all
+  Log file:    /Users/<you>/.blz/refresh-all.log
 ```
 
-Lo script è idempotente: rilanciarlo aggiorna l'entry esistente senza duplicare.
+Lo script è idempotente: rilanciarlo sostituisce l'entry esistente senza duplicare.
 
 Per personalizzare:
 
 ```bash
-SCHEDULE="0 */4 * * *" SOURCE=agno bash scripts/setup-cron.sh   # ogni 4 ore
+SOURCE=agno bash scripts/setup-cron.sh                          # solo agno
+SOURCE=openrouter bash scripts/setup-cron.sh                    # solo openrouter
+SCHEDULE="0 */4 * * *" bash scripts/setup-cron.sh               # ogni 4 ore (tutte)
 BLZ_BIN=/custom/path/blz bash scripts/setup-cron.sh             # path custom
 ```
 
 Per rimuovere:
 
 ```bash
-crontab -l | grep -v 'blz-refresh-agno' | crontab -
+crontab -l | grep -v 'blz-refresh-' | crontab -
 ```
 
 Verifica entry installata:
