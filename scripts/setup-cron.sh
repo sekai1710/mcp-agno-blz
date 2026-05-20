@@ -1,29 +1,40 @@
 #!/usr/bin/env bash
-# Setup a daily cron job to refresh agno-docs-pp-cli's local index.
-# Idempotent: rerun replaces existing entry, never duplicates.
+# Setup daily cron jobs to refresh agno-docs-pp-cli + openrouter-docs-pp-cli.
+# Idempotent: rerun replaces existing entries, never duplicates.
+# Also removes any stale `blz refresh` entry (BLZ has been replaced).
 #
 # Customize via env:
-#   SCHEDULE="0 */6 * * *"  # default: "0 6 * * *" (daily 06:00)
-#   BIN=/custom/path/agno-docs-pp-cli
+#   SCHEDULE="0 6 * * *"   # default: daily 06:00
 set -euo pipefail
 
 SCHEDULE="${SCHEDULE:-0 6 * * *}"
-BIN="${BIN:-$(command -v agno-docs-pp-cli || true)}"
 
-if [ -z "$BIN" ]; then
-  echo "agno-docs-pp-cli not on PATH. Install first:" >&2
-  echo "  go install -tags sqlite_fts5 github.com/sekai1710/agno-docs-pp-cli/cmd/agno-docs-pp-cli@latest" >&2
-  exit 1
-fi
+AGNO_BIN="$(command -v agno-docs-pp-cli || echo "$HOME/go/bin/agno-docs-pp-cli")"
+OR_BIN="$(command -v openrouter-docs-pp-cli || echo "$HOME/go/bin/openrouter-docs-pp-cli")"
 
-MARKER="# agno-docs-pp-cli daily sync"
-LINE="$SCHEDULE $BIN sync >/dev/null 2>&1 $MARKER"
+[ -x "$AGNO_BIN" ] || { echo "agno-docs-pp-cli not found at $AGNO_BIN" >&2; exit 1; }
+[ -x "$OR_BIN"   ] || { echo "openrouter-docs-pp-cli not found at $OR_BIN" >&2; exit 1; }
+
+AGNO_MARKER="# agno-docs-pp-cli daily sync"
+OR_MARKER="# openrouter-docs-pp-cli daily sync"
+AGNO_LINE="$SCHEDULE $AGNO_BIN sync >/dev/null 2>&1 $AGNO_MARKER"
+OR_LINE="$SCHEDULE $OR_BIN sync >/dev/null 2>&1 $OR_MARKER"
 
 TMP=$(mktemp)
-crontab -l 2>/dev/null | grep -v "$MARKER" > "$TMP" || true
-echo "$LINE" >> "$TMP"
+# Drop: existing markers + stale blz lines + the literal "blz-refresh-all" comment line
+crontab -l 2>/dev/null \
+  | grep -v "$AGNO_MARKER" \
+  | grep -v "$OR_MARKER" \
+  | grep -v "blz refresh" \
+  | grep -v "^# blz-refresh-all$" \
+  > "$TMP" || true
+echo "$AGNO_LINE" >> "$TMP"
+echo "$OR_LINE"   >> "$TMP"
 crontab "$TMP"
 rm -f "$TMP"
 
-echo "Installed: $LINE"
-echo "Verify:    crontab -l | grep agno-docs-pp-cli"
+echo "Installed daily sync at: $SCHEDULE"
+echo "  $AGNO_LINE"
+echo "  $OR_LINE"
+echo ""
+echo "Verify: crontab -l"
