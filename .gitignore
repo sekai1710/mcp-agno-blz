@@ -1,9 +1,16 @@
+# Build artifacts (binary at repo root only)
+/agno-docs-pp-cli
+*.exe
+*.o
+
+# Local databases / caches
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Editor / OS
 .DS_Store
-*.swp
-*.swo
-.idea/
 .vscode/
-__pycache__/
-*.pyc
-.env
-node_modules/
+.idea/
+*.swp

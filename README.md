@@ -1,195 +1,175 @@
-# Agno MCP docs — benchmark: HTML scraper vs BLZ + llms-full.txt
+# agno-docs-pp-cli
 
-Confronto tecnico fra due approcci per esporre la documentazione [Agno](https://docs.agno.com) come MCP server a Claude (Code/Desktop) e altri client MCP.
-
-- **Approccio A**: `mcp-agno` (wrapper community) — scraping HTML live di `docs.agno.com` + parsing `BeautifulSoup` + `html2text`.
-- **Approccio B**: [BLZ](https://github.com/outfitter-dev/blz) (MCP generico OSS) che indicizza `llms-full.txt` ufficiale di Agno con Tantivy FTS.
-
-## TL;DR
-
-| Metrica | mcp-agno (scraper) | BLZ |
-|---|---|---|
-| Top-result corretto su 3 query | 0/3 | 3/3 |
-| Snippet inclusi nei search results | mai | sempre |
-| Cache | RAM, persa al restart | SQLite persistente |
-| Latency search | 500–2000 ms (HTTP live) | ~40 ms (locale) |
-| Token medi per Q&A completa | 3000–5000 | 500–1500 |
-| Efficienza | baseline | **5–10x** |
-
-## Il problema
-
-Il MCP `mcp-agno` ha tre difetti strutturali che bruciano token e degradano la qualità delle risposte:
-
-1. **Scraping HTML grezzo**: ogni pagina di `docs.agno.com` viene scaricata e convertita in Markdown via `html2text`. Il problema è che la conversione include sempre tutto il template Mintlify — sidebar nav, header, footer, link "⌘K Ask AI", menù duplicati. Circa l'80% dell'output è rumore, non contenuto utile.
-
-2. **Search keyword-only, niente FTS**: `search_agno_docs` ritorna solo gli slug, niente snippet, niente scoring semantico. Sei costretto a un secondo round-trip con `get_agno_page` per leggere il contenuto, e spesso la risposta torna troncata.
-
-3. **Cache in-memory**: ogni restart del server perde tutto e rifa lo scraping da capo.
-
-## La soluzione
-
-Agno pubblica già due URL pensati apposta per gli LLM:
-
-- `https://docs.agno.com/llms.txt` — indice di 3290 pagine, una riga per ognuna
-- `https://docs.agno.com/llms-full.txt` — 9.6 MB di tutto il contenuto docs in Markdown puro, zero HTML, zero nav
-
-[BLZ](https://github.com/outfitter-dev/blz) è un MCP server (Rust, OSS, outfitter-dev) che indicizza file `llms.txt` con Tantivy (FTS vero), restituisce snippet con citation della riga esatta e tiene tutto in SQLite locale.
-
-## Benchmark — 3 casi d'uso
-
-Setup: entrambi i MCP attivi nella stessa sessione Claude Code, stessa query, output catturato grezzo. Token stimati a 1 token ≈ 4 char.
-
-Raw output dei tre casi: vedi [`benchmark/raw-metrics.md`](benchmark/raw-metrics.md).
-
-### Caso 1 — "workflow step parallel execution"
-
-**mcp-agno**: la prima chiamata restituisce 5 slug senza contenuto, ~150 token, top-result non pertinente (propone "sequence of steps" invece di "parallel"). Devi fare una seconda chiamata per leggere il contenuto, e quella torna ~2500 token troncata, con l'80% di sidebar nav prima del codice utile. Totale: ~2650 token, risposta incompleta, ranking sbagliato.
-
-**BLZ**: una chiamata, 5 risultati pertinenti con snippet inline. Top-result è "Parallel Workflow" esatto. ~310 token, spesso il follow-up non serve. Se vuoi il contenuto completo, una seconda chiamata mirata aggiunge ~260 token di Markdown pulito. Totale: ~575 token, risposta giusta al primo colpo.
-
-**4.6x meno token, ranking corretto.**
-
-### Caso 2 — "agent memory persistent storage"
-
-**mcp-agno**: top 3 risultati sono pagine di "in-memory storage", concetto opposto a "persistent". La pagina corretta è al 4° posto. Niente snippet, devi aprire più pagine prima di capire qual è quella giusta.
-
-**BLZ**: top-result è "Agent With Persistent Memory" esatto. Bonus: il 4° risultato mostra direttamente la tabella comparativa "Memory vs Storage" dentro lo snippet — il dubbio risolto senza nemmeno fare il fetch.
-
-**~9x meno token per arrivare alla risposta giusta.**
-
-### Caso 3 — "team coordinator delegation"
-
-**mcp-agno**: zero risultati pertinenti su cinque. Tutti match keyword "team" su pagine random (deploy, observability, reasoning). La pagina ufficiale `/teams/delegation` non compare nemmeno nei primi cinque.
-
-**BLZ**: top-result è `/teams/delegation` esatto. Gli altri quattro sono sotto-sezioni dello stesso concetto: Tasks Mode, Route Mode, Structured Input, Developer Resources. Tutti pertinenti.
-
-**Su questa query mcp-agno è semplicemente inutilizzabile.**
-
-## Setup BLZ per Agno docs
+> **Offline, agent-native CLI for the [Agno](https://agno.com) developer documentation.**
+> One HTTP GET → 3,200 pages indexed in SQLite + FTS5 → ~10-30 ms per query.
 
 ```bash
-# macOS
-brew tap outfitter-dev/tap
-brew install blz
-
-# Linux/Windows: vedi GitHub releases di BLZ
-# https://github.com/outfitter-dev/blz/releases
-
-# Aggiungi Agno docs come source
-blz add agno https://docs.agno.com/llms-full.txt
-# Output atteso: ✓ Added agno (10034 headings, 291990 lines)
-
-# Test CLI
-blz "workflow parallel" -s agno
+agno-docs-pp-cli which "how do teams work"
+agno-docs-pp-cli context teams
+agno-docs-pp-cli examples "PostgresDb" --language python
 ```
 
-Config MCP (Claude Code `.claude.json` o Claude Desktop `claude_desktop_config.json`):
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Source: llms-full.txt](https://img.shields.io/badge/source-llms--full.txt-brightgreen)](https://docs.agno.com/llms-full.txt)
 
-```json
-{
-  "mcpServers": {
-    "agno-docs": {
-      "type": "stdio",
-      "command": "/opt/homebrew/bin/blz",
-      "args": ["mcp-server", "--quiet"]
-    }
-  }
-}
-```
+---
 
-Restart client, verifica `/mcp` per la connessione. Tool esposti: `find` (search/get/toc) e `blz` (gestione sources).
-
-Aggiornare l'indice quando le docs cambiano: `blz refresh agno` (automatizzabile via cron).
-
-## Replay del benchmark
-
-Per replicare i test:
-
-1. Installa entrambi i MCP nello stesso ambiente
-2. Lancia le tre query da `benchmark/queries.txt`
-3. Confronta gli output con quelli salvati in `benchmark/raw-metrics.md`
-
-## Auto-update dell'indice
-
-Le docs di Agno cambiano nel tempo: nuove pagine, modifiche, deprecazioni. L'indice locale BLZ va rinfrescato periodicamente.
-
-### Refresh on-demand da Claude Code
-
-Il repo include uno slash command pronto in `.claude/commands/refresh-docs.md`. Per attivarlo:
+## Install — one command
 
 ```bash
-# Project-level (solo dentro questo repo)
-# → già attivo se cloni il repo
-
-# User-level (disponibile in qualsiasi sessione Claude Code)
-cp .claude/commands/refresh-docs.md ~/.claude/commands/refresh-docs.md
+curl -sSf https://raw.githubusercontent.com/sekai1710/agno-docs-pp-cli/main/install.sh | bash
 ```
 
-Poi dentro Claude Code:
+That script:
+1. checks for the Go toolchain (≥1.26)
+2. runs `go install -tags sqlite_fts5 github.com/sekai1710/agno-docs-pp-cli/cmd/agno-docs-pp-cli@latest`
+3. runs the first `sync` (~5 seconds, downloads `docs.agno.com/llms-full.txt` once)
+4. tells you how to use it
 
-```
-/refresh-docs
-```
-
-Claude esegue `blz refresh --all` e riporta un riassunto compatto per ogni source aggiornata (numero heading, righe, errori se ci sono).
-
-### Refresh automatico via cron
-
-Per refresh quotidiano automatico di **tutte** le sources (default 06:00 locale):
+If you prefer manual install:
 
 ```bash
-bash scripts/setup-cron.sh
+go install -tags sqlite_fts5 github.com/sekai1710/agno-docs-pp-cli/cmd/agno-docs-pp-cli@latest
+agno-docs-pp-cli sync
 ```
 
-Output atteso:
-```
-✓ Cron installed:
-  Schedule:    0 6 * * *
-  Command:     /opt/homebrew/bin/blz refresh --all
-  Log file:    /Users/<you>/.blz/refresh-all.log
-```
+The `sqlite_fts5` tag is **required** — `go-sqlite3` ships FTS5 behind it.
 
-Lo script è idempotente: rilanciarlo sostituisce l'entry esistente senza duplicare.
-
-Per personalizzare:
+## Quick tour
 
 ```bash
-SOURCE=agno bash scripts/setup-cron.sh                          # solo agno
-SOURCE=openrouter bash scripts/setup-cron.sh                    # solo openrouter
-SCHEDULE="0 */4 * * *" bash scripts/setup-cron.sh               # ogni 4 ore (tutte)
-BLZ_BIN=/custom/path/blz bash scripts/setup-cron.sh             # path custom
+agno-docs-pp-cli doctor                              # health check
+agno-docs-pp-cli sections                            # map of the docs
+agno-docs-pp-cli which "knowledge embedder" -n 3     # top-3 pages
+agno-docs-pp-cli context agents                      # full page body
+agno-docs-pp-cli examples "team coordinate" --language python
 ```
 
-Per rimuovere:
+Every leaf command supports `--json` for agent consumption and `--db <path>` to override the DB location (default `~/.local/share/agno-docs-pp-cli/data.db`).
+
+## Commands
+
+| Command    | What it does                                                                  |
+|-----------|-------------------------------------------------------------------------------|
+| `sync`    | Fetch `docs.agno.com/llms-full.txt` and rebuild the index. Re-run weekly.    |
+| `which`   | Top-N pages for a topic, with snippet. **Start here in any agent workflow.** |
+| `find`    | Same FTS as `which`, longer list, CLI-flavoured output.                       |
+| `context` | Full markdown body of one page (by slug or full URL).                         |
+| `examples`| Paste-ready code blocks. Filter with `--language python\|bash\|json\|yaml`.   |
+| `sections`| List sections (e.g. `models/providers/native`) with page counts.              |
+| `doctor`  | Pages, examples, last sync time, db path.                                     |
+| `version` | Print the CLI version.                                                        |
+
+## Agent integration
+
+The CLI is framework-agnostic. `--json` output drops into anything that can shell out.
+
+### Agno (Python) — ready-to-paste
+
+A complete Agno `Toolkit` lives at [`examples/agent-toolkit.py`](examples/agent-toolkit.py). Copy it into your project and:
+
+```python
+from agent_toolkit import AgnoDocsTool
+
+agent = Agent(
+    model=OpenRouter(id="google/gemini-2.5-flash"),
+    tools=[AgnoDocsTool()],
+    instructions=["Always call agno_docs_which before answering Agno questions."],
+)
+```
+
+Four tools are registered: `agno_docs_which`, `agno_docs_context`, `agno_docs_examples`, `agno_docs_sections`. All async, all `asyncio.to_thread`-wrapped, all subprocess-isolated (a CLI crash cannot take down your agent).
+
+### Other frameworks
+
+- **LangChain / LangGraph** — wrap as a `Tool` via `subprocess.run`.
+- **Claude Code / Cursor** — call directly from `Bash`/`MultiEdit`.
+- **CrewAI / AutoGen** — same subprocess pattern as Agno.
+- **Shell** — `agno-docs-pp-cli which … --json | jq`.
+
+## How it works
+
+`docs.agno.com` publishes [`llms-full.txt`](https://docs.agno.com/llms-full.txt) — every page of the site concatenated into one plain-text markdown file, formatted per the [llms.txt](https://llmstxt.org/) convention:
+
+```
+# Approvals
+Source: https://docs.agno.com/agent-os/approvals/overview
+
+Manage approval workflows for agents and teams via the AgentOS Control Panel.
+...
+```
+
+The CLI is a small pipeline around that single source:
+
+```
+fetch llms-full.txt (10 MB, 1 HTTP GET)
+  ↓
+parse on "# Title\nSource: <url>" boundaries (one regexp, no HTML)
+  ↓
+SQLite + FTS5 (porter unicode61, content-table + auto-sync triggers)
+  ↓
+which / find / context / examples / sections / doctor
+```
+
+Total Go source: ~1,100 lines. No HTML scraper, no headless browser, no auth, no rate limiting — because the source is a single file maintained by the docs team specifically for this purpose.
+
+## Why this exists
+
+If an LLM coding agent calls Agno APIs, it needs grounded reference. The three bad alternatives:
+
+1. **Let it guess.** Hallucinated imports, made-up args, dead URLs.
+2. **Web-fetch `docs.agno.com`.** Slow, HTML parsing, breaks when the site rebuilds.
+3. **Scrape and re-scrape.** Brittle. Every page change breaks something.
+
+`llms-full.txt` solves the source problem. This CLI solves the integration problem: turn the 9.9 MB blob into a 30 ms FTS5 query with JSON output suitable for any agent framework.
+
+## Comparison with BLZ
+
+[BLZ](https://github.com/outfitter-dev/blz) is an excellent general-purpose MCP server for any `llms.txt` source. If you already use BLZ inside an MCP-aware client (Claude Desktop, Cursor's MCP wiring, etc.), point BLZ at `https://docs.agno.com/llms-full.txt` and you're done.
+
+This CLI is the **complementary** path:
+
+| Property                  | BLZ (MCP server)            | `agno-docs-pp-cli`                   |
+|---------------------------|-----------------------------|--------------------------------------|
+| Transport                 | MCP stdio                   | Standalone CLI binary                |
+| Setup                     | Install BLZ + add a source  | `go install` + `sync`                |
+| Sources                   | Any `llms.txt`              | Agno (this repo) / sibling per-source repos |
+| Integrates with           | MCP-aware clients only      | **Any** subprocess-capable runtime   |
+| Where it runs             | Beside your MCP client      | Anywhere you can exec a binary       |
+| Domain-specific commands  | Generic search              | `which` / `context` / `examples`     |
+| Typical latency           | ~50-80 ms                   | ~10-30 ms                            |
+
+Pick BLZ when you want one tool that handles many `llms.txt` sources in MCP clients.
+Pick this CLI when you want a single self-contained binary on a server, in CI, or wired into a non-MCP agent.
+
+You can run both side by side.
+
+## Repository history (honest version)
+
+This repo originally shipped a **benchmark** comparing an HTML scraper-MCP against BLZ for Agno docs. It did not ship an installable CLI — only the comparison artifacts. The benchmark methodology and numbers are preserved under [`benchmark/`](benchmark/) for reference.
+
+The repo now ships the actual CLI:
+
+- **Generator**: [Printing Press](https://github.com/mvanhorn/cli-printing-press) (CLI scaffolding).
+- **Source path**: `llms-full.txt` (plain markdown) instead of HTML scraping — same insight the BLZ project popularized, applied to a CLI instead of an MCP server.
+- **Result**: a single Go binary that any agent runtime (Agno, LangChain, Claude Code, plain bash) can call.
+
+If you came here from the original benchmark post: this is the artifact that should have shipped from day one. Apologies for the delay.
+
+## Development
 
 ```bash
-crontab -l | grep -v 'blz-refresh-' | crontab -
+git clone https://github.com/sekai1710/agno-docs-pp-cli
+cd agno-docs-pp-cli
+make build          # ./agno-docs-pp-cli
+./agno-docs-pp-cli sync --file ./testdata/llms-full.txt
+./agno-docs-pp-cli doctor --json | jq
+make install        # → $GOBIN/agno-docs-pp-cli
 ```
 
-Verifica entry installata:
-
-```bash
-crontab -l | grep blz
-```
-
-Verifica log delle ultime esecuzioni:
-
-```bash
-tail -f ~/.blz/refresh-agno.log
-```
-
-## Onestà tecnica
-
-Lo scraping HTML resta utile quando il sito target **non pubblica** un `llms.txt`. Ma `docs.agno.com` lo pubblica già, quindi ricavare il contenuto via HTML è solo lavoro extra che produce output peggiore.
-
-Lo stesso approccio BLZ funziona per qualsiasi sito con `llms.txt`: Anthropic, Cloudflare, Stripe, e in generale tutti i siti Mintlify-based.
-
-## Credits
-
-- [Agno team](https://agno.com) per pubblicare `llms-full.txt` curato ufficiale
-- [outfitter-dev/blz](https://github.com/outfitter-dev/blz) per il tool di indicizzazione
-- Community Agno per i tentativi iniziali di MCP wrapper, che hanno motivato questa analisi
+Or skip `make` and use `go install -tags sqlite_fts5 ./cmd/agno-docs-pp-cli`.
 
 ## License
 
-MIT — vedi [LICENSE](LICENSE).
+MIT. See [`LICENSE`](LICENSE).
