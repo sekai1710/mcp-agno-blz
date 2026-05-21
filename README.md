@@ -145,17 +145,11 @@ Pick this CLI when you want a single self-contained binary on a server, in CI, o
 
 You can run both side by side.
 
-## Repository history (honest version)
+## How it was built
 
-This repo originally shipped a **benchmark** comparing an HTML scraper-MCP against BLZ for Agno docs. It did not ship an installable CLI — only the comparison artifacts. The benchmark methodology and numbers are preserved under [`benchmark/`](benchmark/) for reference.
+Generated with [Printing Press](https://github.com/mvanhorn/cli-printing-press), with one twist on the usual recipe: instead of mirroring a REST API, the generator is pointed at `docs.agno.com/llms-full.txt` and emits a docs lookup CLI. The `llms-full.txt` source path is the same insight the BLZ project popularized for MCP search — here applied to a single Go binary.
 
-The repo now ships the actual CLI:
-
-- **Generator**: [Printing Press](https://github.com/mvanhorn/cli-printing-press) (CLI scaffolding).
-- **Source path**: `llms-full.txt` (plain markdown) instead of HTML scraping — same insight the BLZ project popularized, applied to a CLI instead of an MCP server.
-- **Result**: a single Go binary that any agent runtime (Agno, LangChain, Claude Code, plain bash) can call.
-
-If you came here from the original benchmark post: this is the artifact that should have shipped from day one. Apologies for the delay.
+The repository also preserves the original benchmark methodology under [`benchmark/`](benchmark/) for reference.
 
 ## Development
 
